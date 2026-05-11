@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/boppenh/chatp-bridge/main/public/favicon.svg" alt="Spaces Logo" width="96" height="96" />
+<!-- <img src="https://raw.githubusercontent.com/boppenh/chatp-bridge/main/public/favicon.svg" alt="Spaces Logo" width="96" height="96" /> -->
+
+img src="[https://raw.githubusercontent.com/boppenh/chatp-bridge/main/public/favicon.svg](https://github.com/brian-Lab-0/win-bridge/blob/main/favicon.svg)" alt="Spaces Logo" width="96" height="96" />
 
 # Spaces Bridge
 
