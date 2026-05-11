@@ -1,102 +1,158 @@
-# win-bridge
+<div align="center">
 
-Local agent for your Windows machine. Lets the [chatp](https://spaces.openbnet.com) web app (running in your browser) drive your desktop — shell, files, UI automation, screenshots — through [Windows-MCP](https://github.com/CursorTouch/Windows-MCP).
+<img src="https://raw.githubusercontent.com/boppenh/chatp-bridge/main/public/favicon.svg" alt="Spaces Logo" width="96" height="96" />
 
-Powers the **win-connect** tool inside chatp.
+# Spaces Bridge
 
-## What it does
+### Connect your Windows desktop to [Spaces](https://spaces.openbnet.com) — and let AI truly control your machine.
 
-- Spawns Windows-MCP as a child process
-- Opens a local WebSocket server on `ws://localhost:3738` for the chatp agent
-- Serves a status dashboard at `http://localhost:3737`
-- Enforces consent (auto / session-armed / per-action), path/app blocklists, audit log
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org)
+[![Platform](https://img.shields.io/badge/Platform-Windows-0078D6.svg)](https://www.microsoft.com/windows)
 
-The bridge stays on YOUR machine. Nothing leaves localhost unless you opt into the relay (advanced cross-machine setup).
+[spaces.openbnet.com](https://spaces.openbnet.com) · [Windows-MCP](https://github.com/CursorTouch/Windows-MCP) · [Report Bug](https://github.com/boppenh/chatp-bridge/issues)
 
-## One-time setup (Windows)
+</div>
 
-1. **Install `uv`** (Python package manager, used for Windows-MCP):
-   ```powershell
-   winget install astral-sh.uv
-   ```
-   Or via pip: `pip install uv`
+---
 
-2. **Verify Windows-MCP runs:**
-   ```powershell
-   uvx windows-mcp
-   ```
-   You should see `Starting MCP server 'windows-mcp' with transport 'stdio'`. Press `Ctrl+C` to stop.
+**Spaces Bridge** is a lightweight local agent that runs on your Windows machine. It creates a secure local tunnel between the [Spaces](https://spaces.openbnet.com) web app in your browser and your desktop — giving the Spaces AI the ability to run shell commands, manage files, control the UI, take screenshots, and more. Everything is powered under the hood by [Windows-MCP](https://github.com/CursorTouch/Windows-MCP).
 
-3. **Install bridge dependencies:**
-   ```powershell
-   npm install
-   ```
+> **Your data stays on your machine.** The bridge only listens on `localhost`. Nothing leaves your local environment unless you explicitly enable relay mode.
 
-## Running
+---
+
+## ✨ What It Does
+
+| Capability | Details |
+|---|---|
+| 🔌 **MCP Launcher** | Starts and manages the Windows-MCP subprocess automatically |
+| 🌐 **WebSocket Server** | Exposes `ws://localhost:3738` for the Spaces agent to connect |
+| 📊 **Live Dashboard** | Status dashboard at `http://localhost:3737` |
+| 🔒 **Consent Controls** | Three authorization modes: auto, session, always-ask |
+| 🚫 **Path & App Blocklists** | Permanently block sensitive paths and processes |
+| 📋 **Audit Logging** | Every action logged to `~/.spaces-bridge/audit.jsonl` |
+
+---
+
+## 🚀 Quick Start (Windows)
+
+### 1. Install `uv` (the Windows-MCP runtime)
+
+```powershell
+winget install astral-sh.uv
+```
+
+Or via pip: `pip install uv`
+
+### 2. Verify Windows-MCP works
+
+```powershell
+uvx windows-mcp
+```
+
+You should see `Starting MCP server 'windows-mcp' with transport 'stdio'`. Press `Ctrl+C` to exit.
+
+### 3. Install Bridge dependencies
+
+```powershell
+npm install
+```
+
+### 4. Start the Bridge
 
 ```powershell
 npm start
 ```
 
-You should see:
+Your terminal will show:
+
 ```
   Agent URL    →  ws://localhost:3738
   Dashboard    →  http://localhost:3737
 ```
 
-Open the chatp web app, go to **Workspace** tab → paste `ws://localhost:3738` (or leave the default) → **Connect**. Done.
+Open [Spaces](https://spaces.openbnet.com), go to the **Workspace** tab → paste `ws://localhost:3738` (or keep the default) → click **Connect**. That's it.
 
-## Configuration (`config.json`)
+---
 
-| Key | Default | Notes |
+## ⚙️ Configuration (`config.json`)
+
+Copy [`config.example.json`](./config.example.json) to `config.json` and adjust as needed:
+
+| Key | Default | Description |
 |---|---|---|
-| `agentWsPort` | `3738` | Port the agent connects to |
-| `dashboardPort` | `3737` | Status dashboard port |
-| `consent.mode` | `auto` | `auto` (allow all), `session` (arm once for 30 min), `always-ask` (per-action dashboard prompt) |
+| `agentWsPort` | `3738` | Port the Spaces agent connects to |
+| `dashboardPort` | `3737` | Dashboard port |
+| `consent.mode` | `auto` | `auto` (allow all), `session` (authorize every 30 min), `always-ask` (confirm each action) |
 | `consent.blockedPaths` | system32, credentials | Glob patterns — always denied |
-| `consent.blockedApps` | lsass, explorer | Substring match — always denied |
-| `useRelay` | `false` | Set `true` only for cross-machine setups |
-| `mcp.command` | `uvx` | Override if Windows-MCP runs differently |
+| `consent.blockedApps` | lsass, explorer | Substring matches — always denied |
+| `useRelay` | `false` | Set to `true` for cross-machine scenarios |
+| `mcp.command` | `uvx` | Windows-MCP launch command (override if needed) |
 
-## Trust model
+---
 
-- Console + dashboard show every action the agent attempts
-- `auto` mode allows anything not in the blocklist — convenient but trust the agent first
-- `session` mode requires clicking "Arm session" in the dashboard once per 30 min
-- `always-ask` shows a consent button in the dashboard for each non-readonly action
-- Emergency stop button kills MCP + bridge instantly
-- Audit log at `~/.chatp-bridge/audit.jsonl` (one event per line, JSON)
+## 🔐 Security & Trust Model
 
-## Cross-machine use (optional, advanced)
+The Bridge puts you in control at all times:
 
-If the bridge and the chatp web app run on different machines, you need the `desktop-relay` server somewhere both can reach.
+- The console and dashboard show every action the agent requests
+- **`auto` mode** — anything not on the blocklist is allowed. Convenient, but only use with agents you trust.
+- **`session` mode** — click "Arm session" in the dashboard; authorization lasts 30 minutes.
+- **`always-ask` mode** — every non-read-only operation pops a confirmation in the dashboard.
+- An **emergency stop** button instantly kills both MCP and the Bridge.
+- All events are written to `~/.spaces-bridge/audit.jsonl` (one JSON object per line).
 
-1. Deploy `chatp/desktop-relay/relay.js` (Node.js, port 2233 by default)
-2. In `config.json` set `useRelay: true`, set `relayUrl` to your relay URL, and pick a `pairingCode`
-3. In the chatp Workspace tab, enter the relay URL and the same pairing code
+---
 
-## Troubleshooting
+## 🖥️ Cross-Machine Usage (Advanced, Optional)
+
+If the Bridge and the Spaces web app run on different machines, you need a `desktop-relay` server that both sides can reach:
+
+1. Deploy `chatp/desktop-relay/relay.js` (Node.js, default port 2233)
+2. Set `useRelay: true`, `relayUrl`, and `pairingCode` in `config.json`
+3. Enter the relay URL and the same pairing code in the Spaces Workspace tab
+
+---
+
+## 🛠️ Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| "Cannot reach bridge" in agent UI | Bridge isn't running, or wrong port. Check `npm start` terminal. |
-| Dashboard shows "MCP not ready" | `uvx windows-mcp` failed to start. Run it manually to see the error. |
-| Port already in use | Another bridge is running, or change `agentWsPort` / `dashboardPort` in `config.json`. |
+| Agent UI shows "Cannot reach bridge" | Bridge isn't running or the port is wrong — check `npm start` terminal output |
+| Dashboard shows "MCP not ready" | `uvx windows-mcp` failed to start — run it manually to see the error |
+| Port already in use | Another Bridge instance is running, or change the port in `config.json` |
 
-## Wire protocol (for reference)
+---
 
-Agent → bridge:
+## 📡 Protocol Reference
+
+**Agent → Bridge (request):**
 ```json
 { "id": "req_123", "type": "exec", "action": "PowerShell", "args": { "command": "Get-Date" } }
 ```
 
-Bridge → agent:
+**Bridge → Agent (response):**
 ```json
 { "id": "req_123", "type": "result", "output": "...", "screenshot": null }
 ```
 
-Bridge → agent (broadcast):
+**Bridge → Agent (broadcast):**
 ```json
-{ "type": "hello",  "capabilities": { "mcpReady": true, "mcpTools": [...], ... } }
-{ "type": "status", "capabilities": { ... } }
+{ "type": "hello",  "capabilities": { "mcpReady": true, "mcpTools": ["..."], "..." : "..." } }
+{ "type": "status", "capabilities": { "..." : "..." } }
 ```
+
+---
+
+## 👥 Contributors
+
+| | |
+|---|---|
+| **Brian** | [@boppenh](https://github.com/boppenh) · [brian@openbnet.com](mailto:brian@openbnet.com) · Founder & Lead Developer |
+
+---
+
+## 📄 License
+
+MIT © [OpenBNet](https://openbnet.com)
