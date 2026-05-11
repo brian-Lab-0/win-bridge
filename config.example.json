@@ -1,0 +1,32 @@
+{
+  "agentWsPort": 3738,
+  "dashboardPort": 3737,
+
+  "_relay_comment": "Relay is OPTIONAL — only needed if bridge and chatp web app are on different machines. Leave useRelay=false for normal local use.",
+  "useRelay": false,
+  "relayUrl": "ws://localhost:2233",
+  "pairingCode": "CHANGE-ME",
+
+  "mcp": {
+    "command": "uvx",
+    "args": ["windows-mcp"],
+    "cwd": null
+  },
+
+  "consent": {
+    "_modes_comment": "auto = allow anything not blocked. session = arm once for 30 min via dashboard. always-ask = per-action prompt.",
+    "mode": "auto",
+    "allowedActions": [
+      "Screenshot",
+      "Snapshot",
+      "Clipboard"
+    ],
+    "blockedPaths": [
+      "C:\\Windows\\System32",
+      "C:\\Users\\*\\AppData\\Local\\Microsoft\\Credentials"
+    ],
+    "blockedApps": ["lsass.exe"]
+  },
+
+  "stopHotkey": "Ctrl+Shift+Esc"
+}

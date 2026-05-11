@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>win-bridge</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; margin: 0; background: #0d0d10; color: #e5e7eb; }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 18px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+    .sub { color: #9ca3af; font-size: 12px; margin-bottom: 18px; }
+
+    /* Connection banner — the thing users actually need on first run */
+    .connect-banner {
+      background: linear-gradient(135deg, #1a2540 0%, #15161a 100%);
+      border: 1px solid #2563eb;
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-bottom: 18px;
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    }
+    .connect-banner .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #93c5fd; margin-bottom: 4px; }
+    .connect-banner .url {
+      font: 600 16px/1 ui-monospace, "Cascadia Code", monospace;
+      color: #fff; background: #0d0d10; padding: 9px 14px; border-radius: 6px;
+      border: 1px solid #2d2e35; user-select: all;
+    }
+    .connect-banner .copy-btn {
+      background: #2563eb; border: none; color: #fff; padding: 8px 14px; border-radius: 6px;
+      font: inherit; font-weight: 500; cursor: pointer;
+    }
+    .connect-banner .copy-btn:hover { background: #1d4ed8; }
+    .connect-banner .copy-btn.copied { background: #15803d; }
+    .connect-banner .hint { flex: 1; min-width: 200px; font-size: 12px; color: #9ca3af; line-height: 1.5; }
+
+    /* Status cards */
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .card { background: #15161a; border: 1px solid #26272d; border-radius: 8px; padding: 10px 12px; }
+    .card .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #9ca3af; margin-bottom: 4px; }
+    .card .val { font-size: 13px; font-weight: 500; }
+    .ok { color: #34d399; }
+    .bad { color: #f87171; }
+    .warn { color: #fbbf24; }
+
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .actions { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+    button { font: inherit; padding: 7px 12px; border-radius: 5px; border: 1px solid #2d2e35; background: #1d1e23; color: #e5e7eb; cursor: pointer; font-size: 12px; }
+    button:hover { background: #25262c; }
+    button.primary { background: #2563eb; border-color: #2563eb; }
+    button.primary:hover { background: #1d4ed8; }
+    button.danger  { background: #b91c1c; border-color: #b91c1c; }
+    button.danger:hover  { background: #991b1b; }
+    button.allow   { background: #15803d; border-color: #15803d; }
+    button.deny    { background: #3f3f46; }
+
+    .section-h { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #9ca3af; margin: 18px 0 8px; }
+    .pending { background: #1c1409; border: 1px solid #b45309; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+    .pending h3 { margin: 0 0 6px; font-size: 13px; color: #fbbf24; display: flex; align-items: center; gap: 6px; }
+    .pending pre { background: #0d0d10; padding: 6px 8px; border-radius: 4px; margin: 6px 0; font-size: 11px; max-height: 90px; overflow: auto; }
+
+    .feed { background: #15161a; border: 1px solid #26272d; border-radius: 8px; max-height: 280px; overflow-y: auto; }
+    .feed .row { padding: 5px 12px; border-bottom: 1px solid #1f2026; font-size: 12px; gap: 10px; }
+    .feed .row:last-child { border-bottom: none; }
+    .feed .ts { color: #6b7280; font-family: ui-monospace, monospace; font-size: 10px; min-width: 64px; }
+    .feed .kind { min-width: 130px; color: #9ca3af; font-size: 11px; }
+    .feed .msg { flex: 1; word-break: break-word; }
+    .kind-action_start { color: #60a5fa; }
+    .kind-action_done  { color: #34d399; }
+    .kind-action_error,.kind-blocked,.kind-mcp_error,.kind-mcp_init_error,.kind-mcp_exit,.kind-relay_error { color: #f87171; }
+    .kind-consent_request { color: #fbbf24; }
+    .kind-consent_allow,.kind-paired,.kind-mcp_ready,.kind-agent_joined,.kind-relay_open { color: #34d399; }
+    .kind-consent_deny,.kind-consent_timeout,.kind-stop,.kind-agent_gone { color: #fb923c; }
+    .empty { padding: 18px; text-align: center; color: #6b7280; font-size: 12px; }
+    .tools-list code { background: #1f2026; padding: 2px 6px; margin: 0 4px 4px 0; display: inline-block; border-radius: 3px; color: #d1d5db; font-size: 11px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>● win-bridge</h1>
+  <div class="sub">Local agent on this machine — auto-refreshes every 1.5s.</div>
+
+  <!-- The thing users need most: the URL to paste into the chatp web app -->
+  <div class="connect-banner">
+    <div>
+      <div class="label">Agent connection URL</div>
+      <span class="url" id="s-agent-url">ws://localhost:3738</span>
+    </div>
+    <button class="copy-btn" id="copy-btn" onclick="copyUrl()">Copy</button>
+    <div class="hint">
+      Paste this in the chatp web app's <strong>Workspace</strong> tab and click <strong>Connect</strong>.
+      No pairing code needed for local use.
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="lbl">Windows-MCP</div><div class="val" id="s-mcp">…</div></div>
+    <div class="card"><div class="lbl">Agent</div><div class="val" id="s-agent">…</div></div>
+    <div class="card"><div class="lbl">Consent</div><div class="val" id="s-mode">…</div></div>
+    <div class="card"><div class="lbl">Session</div><div class="val" id="s-session">…</div></div>
+  </div>
+
+  <div class="actions">
+    <button class="primary" onclick="arm()">Arm session (30 min)</button>
+    <button onclick="disarm()">Disarm</button>
+    <button class="danger" onclick="stop()">Emergency stop</button>
+  </div>
+
+  <div id="offline-banner" class="pending" style="display:none;background:#2a1010;border-color:#b91c1c;">
+    <h3 style="color:#fca5a5">⚠ Dashboard can't reach the bridge</h3>
+    <div style="font-size:12px;color:#fca5a5;line-height:1.5;">
+      Likely causes: bridge process exited (check the terminal where you ran <code>npm start</code>),
+      or you opened this file as <code>file://...</code> instead of <code>http://localhost:3737</code>.
+    </div>
+  </div>
+
+  <div id="mcp-error-banner" class="pending" style="display:none;">
+    <h3>⚠ Windows-MCP failed to start</h3>
+    <div id="mcp-error-msg" style="font-size:12px;line-height:1.5;"></div>
+    <div style="font-size:12px;margin-top:6px;color:#fde68a;">
+      Install <code>uv</code> (<code>winget install astral-sh.uv</code> or <code>pip install uv</code>),
+      then verify with <code>uvx windows-mcp</code> and restart the bridge.
+    </div>
+  </div>
+
+  <div id="pending-area"></div>
+
+  <div class="section-h">Available MCP tools (<span id="tools-count">0</span>)</div>
+  <div class="card tools-list" id="tools-card" style="margin-bottom:18px;font-size:11px;color:#9ca3af;">…</div>
+
+  <div class="section-h">Recent activity</div>
+  <div class="feed" id="feed"><div class="empty">no events yet</div></div>
+</div>
+
+<script>
+async function refresh() {
+  try {
+    const r = await fetch('/state'); const s = await r.json();
+    document.getElementById('offline-banner').style.display = 'none';
+    if (s.agentWsUrl) document.getElementById('s-agent-url').textContent = s.agentWsUrl;
+    document.getElementById('s-mcp').innerHTML   = s.mcpReady    ? '<span class="ok">ready</span>'    : '<span class="bad">not ready</span>';
+    document.getElementById('s-agent').innerHTML = s.agentJoined ? '<span class="ok">connected</span>' : '<span class="warn">waiting</span>';
+    document.getElementById('s-mode').textContent = s.consentMode;
+    if (s.sessionArmed && s.sessionExpiresAt > Date.now()) {
+      const mins = Math.ceil((s.sessionExpiresAt - Date.now()) / 60000);
+      document.getElementById('s-session').innerHTML = '<span class="ok">armed · ' + mins + ' min</span>';
+    } else if (s.consentMode === 'auto') {
+      document.getElementById('s-session').innerHTML = '<span class="ok">auto-allow</span>';
+    } else {
+      document.getElementById('s-session').innerHTML = '<span class="warn">disarmed</span>';
+    }
+
+    const errBanner = document.getElementById('mcp-error-banner');
+    if (s.mcpError && !s.mcpReady) {
+      errBanner.style.display = 'block';
+      document.getElementById('mcp-error-msg').textContent = s.mcpError;
+    } else {
+      errBanner.style.display = 'none';
+    }
+
+    const toolsCard = document.getElementById('tools-card');
+    document.getElementById('tools-count').textContent = (s.mcpTools || []).length;
+    if (s.mcpTools && s.mcpTools.length) {
+      toolsCard.innerHTML = s.mcpTools.map(t => '<code>' + escapeHtml(t) + '</code>').join('');
+    } else {
+      toolsCard.textContent = s.mcpReady ? 'No tools advertised by MCP' : 'Waiting for MCP to start…';
+    }
+
+    const pa = document.getElementById('pending-area');
+    if (s.pending && s.pending.length) {
+      pa.innerHTML = s.pending.map(p =>
+        '<div class="pending"><h3>⚠ Agent wants to run: <code>' + escapeHtml(p.action) + '</code></h3>' +
+        '<pre>' + escapeHtml(JSON.stringify(p.args || {}, null, 2)) + '</pre>' +
+        '<div class="row">' +
+          '<button class="allow" onclick="decide(\'' + p.id + '\',\'allow\')">Allow</button>' +
+          '<button class="deny"  onclick="decide(\'' + p.id + '\',\'deny\')">Deny</button>' +
+        '</div></div>'
+      ).join('');
+    } else {
+      pa.innerHTML = '';
+    }
+
+    const feed = document.getElementById('feed');
+    if (s.recent && s.recent.length) {
+      feed.innerHTML = s.recent.map(r =>
+        '<div class="row"><span class="ts">' + new Date(r.ts).toLocaleTimeString() + '</span>' +
+        '<span class="kind kind-' + r.kind + '">' + r.kind + '</span>' +
+        '<span class="msg">' + escapeHtml(r.action || r.msg || '') + '</span></div>'
+      ).join('');
+    } else {
+      feed.innerHTML = '<div class="empty">no events yet</div>';
+    }
+  } catch (e) {
+    document.getElementById('offline-banner').style.display = 'block';
+  }
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function copyUrl() {
+  const url = document.getElementById('s-agent-url').textContent;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.classList.add('copied'); btn.textContent = '✓ Copied';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 1500);
+  });
+}
+async function decide(id, dec) { await fetch('/consent/' + id + '/' + dec, { method: 'POST' }); refresh(); }
+async function arm()    { await fetch('/arm',    { method: 'POST' }); refresh(); }
+async function disarm() { await fetch('/disarm', { method: 'POST' }); refresh(); }
+async function stop()   { if (confirm('Stop the bridge? You will need to restart it to reconnect.')) { await fetch('/stop', { method: 'POST' }); } }
+setInterval(refresh, 1500); refresh();
+</script>
+</body>
+</html>

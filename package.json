@@ -1,0 +1,28 @@
+{
+  "name": "win-bridge",
+  "version": "0.1.0",
+  "description": "Local agent for Windows that lets a remote chatp web app drive your desktop (shell, files, UI, screenshots) via Windows-MCP.",
+  "main": "bridge.js",
+  "bin": {
+    "win-bridge": "bridge.js"
+  },
+  "scripts": {
+    "start": "node bridge.js",
+    "dashboard": "node bridge.js --dashboard-only",
+    "postinstall": "node scripts/check-uvx.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brian-Lab-0/win-bridge.git"
+  },
+  "keywords": ["chatp", "win-connect", "windows-mcp", "desktop-automation", "mcp"],
+  "author": "brian-Lab-0",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/brian-Lab-0/win-bridge/issues"
+  },
+  "homepage": "https://github.com/brian-Lab-0/win-bridge#readme",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

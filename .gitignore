@@ -1,0 +1,14 @@
+node_modules/
+*.log
+npm-debug.log*
+.env
+.env.local
+.DS_Store
+Thumbs.db
+
+# User config — copy config.example.json to config.json
+config.json
+
+# Local audit log lives in $HOME/.chatp-bridge/ already, but ignore any
+# stray local copies someone might drop here.
+audit.jsonl
