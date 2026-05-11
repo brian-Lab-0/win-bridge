@@ -2,7 +2,7 @@
 
 <!-- <img src="https://raw.githubusercontent.com/boppenh/chatp-bridge/main/public/favicon.svg" alt="Spaces Logo" width="96" height="96" /> -->
 
-img src="https://raw.githubusercontent.com/boppenh/chatp-bridge/main/public/favicon.svg" alt="Spaces Logo" width="96" height="96" />
+img src="favicon.svg" alt="Spaces Logo" width="96" height="96" />
 
 # Spaces Bridge
 
