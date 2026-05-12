@@ -157,4 +157,4 @@ If the Bridge and the Spaces web app run on different machines, you need a `desk
 
 ## 📄 License
 
-MIT © [OpenBNet](https://openbnet.com)
+MIT © [OpenBNet](https://spaces.openbnet.com)
