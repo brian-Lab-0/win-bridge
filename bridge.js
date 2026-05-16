@@ -198,6 +198,12 @@ const startMcp = () => {
   setTimeout(async () => {
     try {
       const init = await callMcp('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'chatp-bridge', version: '0.1.0' } }, 15_000);
+      if (init?.error) {
+        state.mcpError = `MCP init failed: ${init.error.message || JSON.stringify(init.error)}`;
+        audit({ kind: 'mcp_init_error', msg: state.mcpError });
+        sendStatus();
+        return;
+      }
       state.mcpReady = true;
       state.mcpError = null;
       audit({ kind: 'mcp_ready', msg: init?.result?.serverInfo?.name || 'connected' });

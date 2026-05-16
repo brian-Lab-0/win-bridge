@@ -11,7 +11,22 @@ const exampleCfg = path.join(root, 'config.example.json');
 const userCfg    = path.join(root, 'config.json');
 
 if (fs.existsSync(userCfg)) {
-  console.log('[setup] config.json already exists — leaving it untouched.');
+  // Migrate stale configs from older bridge versions. The Windows-MCP CLI
+  // changed to require a `serve` subcommand — older configs only pass
+  // ["windows-mcp"], which now just prints help and exits.
+  try {
+    const cfg = JSON.parse(fs.readFileSync(userCfg, 'utf-8'));
+    const args = cfg?.mcp?.args;
+    if (Array.isArray(args) && args[0] === 'windows-mcp' && !args.includes('serve')) {
+      cfg.mcp.args = ['windows-mcp', 'serve'];
+      fs.writeFileSync(userCfg, JSON.stringify(cfg, null, 2) + '\n', 'utf-8');
+      console.log('[setup] ✓ migrated config.json: mcp.args now ["windows-mcp", "serve"]');
+    } else {
+      console.log('[setup] config.json already exists — leaving it untouched.');
+    }
+  } catch (e) {
+    console.log('[setup] config.json exists but could not be parsed — leaving it alone.');
+  }
   process.exit(0);
 }
 

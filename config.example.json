@@ -9,7 +9,7 @@
 
   "mcp": {
     "command": "uvx",
-    "args": ["windows-mcp"],
+    "args": ["windows-mcp", "serve"],
     "cwd": null
   },
 
