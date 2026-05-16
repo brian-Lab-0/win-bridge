@@ -126,7 +126,11 @@ const startMcp = () => {
   state.mcpError = null;
   state.mcpReady = false;
   mcpStartedAt = Date.now();
-  mcp = spawn(cmd, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32', windowsHide: true });
+  // PYTHONUNBUFFERED=1 forces python to line-buffer stdout. Without this,
+  // Windows-MCP's JSON-RPC responses sit in python's block-buffered stdout
+  // and never reach us before the initialize timeout fires.
+  const childEnv = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' };
+  mcp = spawn(cmd, args, { cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32', windowsHide: true });
   const thisChild = mcp;
 
   mcp.on('error', (err) => {
