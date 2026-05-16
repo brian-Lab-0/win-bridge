@@ -44,8 +44,10 @@ try {
 if (args.pairing) config.pairingCode = args.pairing;
 if (args.relay)   config.relayUrl    = args.relay;
 
-if (!config.pairingCode || config.pairingCode === 'CHANGE-ME') {
-  console.error(`[bridge] Set "pairingCode" in config.json (or pass --pairing=XYZ)`);
+// Pairing code only matters when relay mode is enabled (cross-machine).
+// For default local/direct-WS mode the agent connects straight to ws://localhost:3738.
+if (config.useRelay && (!config.pairingCode || config.pairingCode === 'CHANGE-ME')) {
+  console.error(`[bridge] useRelay=true but no pairingCode set in config.json — set one (or pass --pairing=XYZ)`);
   process.exit(1);
 }
 
@@ -87,28 +89,61 @@ const audit = (entry) => {
 let mcp = null;
 const mcpPending = new Map();   // id → { resolve, reject, expiresAt }
 let mcpId = 1;
+let mcpRestartTimer = null;
+let mcpShuttingDown = false;     // set during emergency-stop / SIGINT — disables auto-restart
+
+// Kill the full MCP process tree. On Windows, spawning with shell:true means
+// mcp.kill() only signals cmd.exe — leaving orphaned uvx/python children that
+// hold the stdio handles. taskkill /T walks the parent→child tree.
+const killMcpTree = () => {
+  if (!mcp || mcp.killed || mcp.exitCode !== null) return;
+  if (process.platform === 'win32' && mcp.pid) {
+    try { spawn('taskkill', ['/PID', String(mcp.pid), '/T', '/F'], { stdio: 'ignore' }); }
+    catch { try { mcp.kill(); } catch {} }
+  } else {
+    try { mcp.kill(); } catch {}
+  }
+};
 
 const startMcp = () => {
+  if (mcpRestartTimer) { clearTimeout(mcpRestartTimer); mcpRestartTimer = null; }
+
+  // If a previous mcp handle is still around (e.g. after auto-restart),
+  // kill its tree before spawning a new one so the new child owns stdio cleanly.
+  if (mcp && mcp.exitCode === null && !mcp.killed) killMcpTree();
+  mcp = null;
+  mcpId = 1;
+  rejectAllPending('MCP restarting');
+
   const cmd  = config.mcp?.command || 'windows-mcp';
   const args = config.mcp?.args || [];
   const cwd  = config.mcp?.cwd || undefined;
 
   state.mcpError = null;
-  mcp = spawn(cmd, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32' });
+  state.mcpReady = false;
+  mcp = spawn(cmd, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32', windowsHide: true });
+  const thisChild = mcp;
 
   mcp.on('error', (err) => {
     state.mcpError = `spawn failed: ${err.message} (is "${cmd}" on PATH?)`;
     audit({ kind: 'mcp_error', msg: state.mcpError });
     state.mcpReady = false;
     rejectAllPending(state.mcpError);
-    if (relayWs && relayWs.readyState === 1) sendStatus();
+    sendStatus();
   });
   mcp.on('exit', (code) => {
-    state.mcpError = state.mcpError || `MCP child exited (code=${code}). Check that "${cmd}" is installed and runnable.`;
+    if (thisChild !== mcp) return;          // stale handle — a newer mcp is running
+    state.mcpError = state.mcpError || `MCP child exited (code=${code}).`;
     audit({ kind: 'mcp_exit', msg: `code=${code}` });
     state.mcpReady = false;
     rejectAllPending(state.mcpError);
-    if (relayWs && relayWs.readyState === 1) sendStatus();
+    sendStatus();
+    // Auto-restart unless we're shutting down deliberately. Most "second-time"
+    // failures came from the orphan-child issue above; with that fixed, this
+    // catches any remaining transient crashes (e.g. uvx update mid-run).
+    if (!mcpShuttingDown && !mcpRestartTimer) {
+      mcpRestartTimer = setTimeout(() => { mcpRestartTimer = null; audit({ kind: 'mcp_restart', msg: 'auto-restart after exit' }); startMcp(); }, 1500);
+    }
   });
   mcp.stdin.on('error', (err) => {
     audit({ kind: 'mcp_stdin_error', msg: err.message });
@@ -450,7 +485,8 @@ const dashServer = http.createServer((req, res) => {
   }
   if (req.method === 'POST' && req.url === '/stop') {
     audit({ kind: 'stop', msg: 'emergency stop from dashboard' });
-    if (mcp && !mcp.killed) mcp.kill();
+    mcpShuttingDown = true;
+    killMcpTree();
     if (relayWs) relayWs.close();
     setTimeout(() => process.exit(0), 200);
     res.writeHead(204); res.end();
@@ -496,7 +532,8 @@ if (!args['dashboard-only']) {
 // Ctrl-C → clean shutdown
 process.on('SIGINT', () => {
   console.log('\n[bridge] shutting down');
-  if (mcp && !mcp.killed) mcp.kill();
+  mcpShuttingDown = true;
+  killMcpTree();
   if (relayWs) relayWs.close();
-  process.exit(0);
+  setTimeout(() => process.exit(0), 300);
 });

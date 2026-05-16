@@ -39,7 +39,25 @@
 
 ## 🚀 Quick Start (Windows)
 
-### 1. Install `uv` (the Windows-MCP runtime)
+### Option A — One-click installer (recommended)
+
+1. Download or clone this repo.
+2. Double-click **`install.bat`**.
+
+That's it. The installer will:
+
+- Check that Node.js 18+ is installed (offers to install it via winget if missing)
+- Install `uv` (the Python toolchain for Windows-MCP) if missing
+- Pre-fetch the Windows-MCP package so the first run is fast
+- Run `npm install`
+- Generate a `config.json` (with a random pairing code) if you don't have one yet
+- Launch the bridge
+
+Leave the window open while you use win-connect. Re-run `start.bat` next time — you only do the full install once.
+
+### Option B — Manual install
+
+#### 1. Install `uv` (the Windows-MCP runtime)
 
 ```powershell
 winget install astral-sh.uv
@@ -47,7 +65,7 @@ winget install astral-sh.uv
 
 Or via pip: `pip install uv`
 
-### 2. Verify Windows-MCP works
+#### 2. Verify Windows-MCP works
 
 ```powershell
 uvx windows-mcp
@@ -55,13 +73,13 @@ uvx windows-mcp
 
 You should see `Starting MCP server 'windows-mcp' with transport 'stdio'`. Press `Ctrl+C` to exit.
 
-### 3. Install Bridge dependencies
+#### 3. Install Bridge dependencies
 
 ```powershell
 npm install
 ```
 
-### 4. Start the Bridge
+#### 4. Start the Bridge
 
 ```powershell
 npm start
@@ -124,6 +142,7 @@ If the Bridge and the Spaces web app run on different machines, you need a `desk
 | Agent UI shows "Cannot reach bridge" | Bridge isn't running or the port is wrong — check `npm start` terminal output |
 | Dashboard shows "MCP not ready" | `uvx windows-mcp` failed to start — run it manually to see the error |
 | Port already in use | Another Bridge instance is running, or change the port in `config.json` |
+| MCP works on first run, fails on restart | Fixed in v0.2 — the bridge now kills the full MCP process tree and auto-restarts on crash. Update with `git pull && npm install`. |
 
 ---
 
