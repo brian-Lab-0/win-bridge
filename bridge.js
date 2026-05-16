@@ -91,6 +91,10 @@ const mcpPending = new Map();   // id → { resolve, reject, expiresAt }
 let mcpId = 1;
 let mcpRestartTimer = null;
 let mcpShuttingDown = false;     // set during emergency-stop / SIGINT — disables auto-restart
+let mcpStartedAt = 0;            // ms timestamp of the current child's spawn
+let mcpFailStreak = 0;           // consecutive fast failures (<30s lived) — drives backoff + give-up
+const MCP_MAX_FAILS = 5;         // after this many fast crashes in a row, stop and surface the error
+const MCP_HEALTHY_MS = 30_000;   // if a child lives this long, treat as healthy and reset the streak
 
 // Kill the full MCP process tree. On Windows, spawning with shell:true means
 // mcp.kill() only signals cmd.exe — leaving orphaned uvx/python children that
@@ -121,6 +125,7 @@ const startMcp = () => {
 
   state.mcpError = null;
   state.mcpReady = false;
+  mcpStartedAt = Date.now();
   mcp = spawn(cmd, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32', windowsHide: true });
   const thisChild = mcp;
 
@@ -133,17 +138,31 @@ const startMcp = () => {
   });
   mcp.on('exit', (code) => {
     if (thisChild !== mcp) return;          // stale handle — a newer mcp is running
+    const lived = Date.now() - mcpStartedAt;
     state.mcpError = state.mcpError || `MCP child exited (code=${code}).`;
-    audit({ kind: 'mcp_exit', msg: `code=${code}` });
+    audit({ kind: 'mcp_exit', msg: `code=${code}, lived=${Math.round(lived/1000)}s` });
     state.mcpReady = false;
     rejectAllPending(state.mcpError);
     sendStatus();
-    // Auto-restart unless we're shutting down deliberately. Most "second-time"
-    // failures came from the orphan-child issue above; with that fixed, this
-    // catches any remaining transient crashes (e.g. uvx update mid-run).
-    if (!mcpShuttingDown && !mcpRestartTimer) {
-      mcpRestartTimer = setTimeout(() => { mcpRestartTimer = null; audit({ kind: 'mcp_restart', msg: 'auto-restart after exit' }); startMcp(); }, 1500);
+
+    if (mcpShuttingDown || mcpRestartTimer) return;
+
+    // Healthy life → reset streak. Otherwise count this as a fast failure.
+    if (lived >= MCP_HEALTHY_MS) mcpFailStreak = 0;
+    else mcpFailStreak += 1;
+
+    // Stop flickering: after too many fast restarts, give up and surface a stable error.
+    if (mcpFailStreak >= MCP_MAX_FAILS) {
+      state.mcpError = `MCP keeps crashing on startup (${mcpFailStreak} times in a row). Try running \`uvx windows-mcp\` manually to see the underlying error, then restart the bridge.`;
+      audit({ kind: 'mcp_give_up', msg: state.mcpError });
+      sendStatus();
+      return;
     }
+
+    // Exponential backoff: 1.5s, 3s, 6s, 12s, 24s — gives uvx / python a chance to settle.
+    const delay = Math.min(1500 * Math.pow(2, mcpFailStreak - 1), 24_000);
+    audit({ kind: 'mcp_restart', msg: `auto-restart in ${Math.round(delay/1000)}s (attempt ${mcpFailStreak}/${MCP_MAX_FAILS})` });
+    mcpRestartTimer = setTimeout(() => { mcpRestartTimer = null; startMcp(); }, delay);
   });
   mcp.stdin.on('error', (err) => {
     audit({ kind: 'mcp_stdin_error', msg: err.message });

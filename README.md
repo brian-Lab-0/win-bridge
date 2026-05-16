@@ -39,23 +39,19 @@
 
 ## 🚀 Quick Start (Windows)
 
-### Option A — One-click installer (recommended)
+### Recommended — one file, every time
 
 1. Download or clone this repo.
-2. Double-click **`install.bat`**.
+2. Double-click **`start.bat`**.
 
-That's it. The installer will:
+`start.bat` is smart:
 
-- Check that Node.js 18+ is installed (offers to install it via winget if missing)
-- Install `uv` (the Python toolchain for Windows-MCP) if missing
-- Pre-fetch the Windows-MCP package so the first run is fast
-- Run `npm install`
-- Generate a `config.json` (with a random pairing code) if you don't have one yet
-- Launch the bridge
+- **First run:** runs the full installer (checks Node, installs `uv`, pre-fetches Windows-MCP, runs `npm install`, generates `config.json`) and then launches the bridge.
+- **Every later run:** just launches the bridge — no install steps, no waiting.
 
-Leave the window open while you use win-connect. Re-run `start.bat` next time — you only do the full install once.
+Leave the terminal open while you use win-connect. Press `Ctrl+C` to stop the bridge.
 
-### Option B — Manual install
+### Manual install (if you'd rather do it yourself)
 
 #### 1. Install `uv` (the Windows-MCP runtime)
 

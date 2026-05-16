@@ -83,6 +83,12 @@ exit /b 0
 
 REM ─── 3) Pre-fetch Windows-MCP ────────────────────────────────────────
 :prefetch_mcp
+REM Skip the slow prefetch if the user has already started the bridge once
+REM (uv keeps a per-user package cache; once cached, future runs are instant).
+if exist "%LOCALAPPDATA%\uv\cache\archive-v0" goto :npm_install
+if exist "%USERPROFILE%\.cache\uv"             goto :npm_install
+if exist "node_modules\ws\package.json"        goto :npm_install
+
 echo  [3/5] Pre-fetching Windows-MCP package (one-time, ~30 seconds)...
 REM Cache the package so the first bridge run is fast. Background-launch then kill.
 start /b "" cmd /c "uvx windows-mcp 1>nul 2>nul"
@@ -93,8 +99,11 @@ taskkill /F /IM python.exe /FI "WINDOWTITLE eq windows-mcp*" >nul 2>&1
 echo        Windows-MCP cached.
 
 REM ─── 4) npm install + config ─────────────────────────────────────────
+:npm_install
 echo  [4/5] Installing bridge dependencies...
-if not exist node_modules (
+REM Check for the actual `ws` package, not just node_modules — a half-finished
+ REM install leaves an empty folder around and would otherwise be skipped.
+if not exist "node_modules\ws\package.json" (
   call npm install --no-audit --no-fund
   if !ERRORLEVEL! NEQ 0 (
     echo  [!] npm install failed. Check the error above.
@@ -102,7 +111,7 @@ if not exist node_modules (
     exit /b 1
   )
 ) else (
-  echo        node_modules already present - skipping npm install.
+  echo        Dependencies already installed - skipping npm install.
 )
 
 if not exist config.json (

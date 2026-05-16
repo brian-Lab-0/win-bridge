@@ -1,6 +1,6 @@
 {
   "name": "win-bridge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local agent for Windows that lets a remote chatp web app drive your desktop (shell, files, UI, screenshots) via Windows-MCP.",
   "main": "bridge.js",
   "bin": {
