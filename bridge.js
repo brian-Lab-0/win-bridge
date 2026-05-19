@@ -22,8 +22,10 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const os = require('os');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const WebSocket = require('ws');
+const { ensureWindowsMcp } = require('./scripts/ensure-mcp');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -64,8 +66,16 @@ try { fs.mkdirSync(AUDIT_DIR, { recursive: true }); } catch {}
 // ─── Audit + state ──────────────────────────────────────────────────────────
 
 const state = {
+  // Boot phase is a coarse state machine so the dashboard / agent can see
+  // *why* mcpReady is still false (e.g. "installing", "spawning", "handshake")
+  // rather than just a silent gap. Values:
+  //   preflight | ensuring | spawning | handshake | ready | error
+  bootPhase: 'preflight',
+  bootMessage: 'starting',
   mcpReady: false,
   mcpError: null,                             // last spawn / init error, surfaced to dashboard + agent
+  mcpVersion: null,                           // resolved from ensureWindowsMcp()
+  mcpFirstInstall: false,                     // true on the first run — drives longer init timeout
   mcpTools: [],                               // tool names from MCP tools/list — empty until ready
   mcpToolSchemas: {},                         // { toolName: inputSchema } — populated after tools/list
   relayConnected: false,
@@ -75,6 +85,21 @@ const state = {
   recent: [],                                 // ring of {ts, action, status, output?}
   pendingConsent: new Map(),                  // id → {action, args, resolve, expiresAt}
 };
+
+// Tool-call dampener: if the same {action, args_hash} fails N times in a row,
+// short-circuit subsequent identical calls with the cached error so a confused
+// agent can't infinite-loop the bridge against MCP.
+const toolFailures = new Map();   // hash → { count, lastError, ts }
+const DAMPEN_THRESHOLD = 3;
+const DAMPEN_TTL_MS = 60_000;
+
+const setBootPhase = (phase, msg) => {
+  state.bootPhase = phase;
+  state.bootMessage = msg || '';
+  audit({ kind: 'boot_phase', msg: `${phase}: ${msg || ''}` });
+  sendStatusSafe();
+};
+const sendStatusSafe = () => { try { sendStatus(); } catch {} };
 
 const audit = (entry) => {
   const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
@@ -174,6 +199,28 @@ const startMcp = () => {
   });
 
   let buf = '';
+  let initFired = false;
+  // Fire the initialize handshake only AFTER MCP has actually started emitting
+  // *something* on stdout or stderr. uvx on a cold cache can take >15s before
+  // the python process is even up; firing initialize blindly after 500ms
+  // burns the timeout. We watch for the FastMCP banner ("Starting MCP server")
+  // OR any stdout line — whichever comes first — and then send initialize.
+  const fireInitWhenReady = () => {
+    if (initFired) return;
+    initFired = true;
+    setBootPhase('handshake', 'sending initialize');
+    runInitHandshake(thisChild);
+  };
+  // Safety net: if no banner appears in time, try anyway. First-install gets
+  // a generous window because uvx must download ~95 packages first.
+  const bannerTimeoutMs = state.mcpFirstInstall ? 120_000 : 30_000;
+  const bannerSafetyTimer = setTimeout(() => {
+    if (!initFired) {
+      audit({ kind: 'mcp_banner_timeout', msg: `no banner in ${Math.round(bannerTimeoutMs/1000)}s — attempting initialize anyway` });
+      fireInitWhenReady();
+    }
+  }, bannerTimeoutMs);
+
   mcp.stdout.on('data', (chunk) => {
     buf += chunk.toString('utf-8');
     let nl;
@@ -189,19 +236,31 @@ const startMcp = () => {
           resolve(msg);
         }
       } catch (e) {
-        // MCP banner / log line — ignore
+        // Non-JSON line on stdout (banner / log). Treat as the signal that
+        // MCP is alive enough for the handshake.
+        if (!initFired) { clearTimeout(bannerSafetyTimer); fireInitWhenReady(); }
       }
     }
   });
   mcp.stderr.on('data', (d) => {
     const s = d.toString().trim();
     if (s) console.error(`[mcp] ${s}`);
+    // FastMCP writes "Starting MCP server 'windows-mcp' transport.py:209
+    // with transport 'stdio'" on stderr. That's our reliable "alive" signal.
+    if (!initFired && /Starting MCP server|transport 'stdio'/i.test(s)) {
+      clearTimeout(bannerSafetyTimer);
+      fireInitWhenReady();
+    }
   });
+};
 
-  // MCP initialise handshake → then list tools so we know what actions are real
-  setTimeout(async () => {
+// Pulled out so the banner-detection code above stays readable.
+async function runInitHandshake(thisChild) {
     try {
-      const init = await callMcp('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'chatp-bridge', version: '0.1.0' } }, 15_000);
+      // First-install: uvx may still be unpacking on the first initialize.
+      // Use a generous timeout on first run, normal afterwards.
+      const initTimeout = state.mcpFirstInstall ? 60_000 : 15_000;
+      const init = await callMcp('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'chatp-bridge', version: '0.1.0' } }, initTimeout);
       if (init?.error) {
         state.mcpError = `MCP init failed: ${init.error.message || JSON.stringify(init.error)}`;
         audit({ kind: 'mcp_init_error', msg: state.mcpError });
@@ -222,14 +281,16 @@ const startMcp = () => {
         audit({ kind: 'mcp_tools_error', msg: e.message });
       }
 
-      if (relayWs && relayWs.readyState === 1) sendStatus();
+      state.bootPhase = 'ready';
+      state.bootMessage = `MCP ready (${state.mcpTools.length} tools)`;
+      sendStatusSafe();
+      printReadyBanner();
     } catch (err) {
       state.mcpError = `MCP init failed: ${err.message}`;
       audit({ kind: 'mcp_init_error', msg: state.mcpError });
-      if (relayWs && relayWs.readyState === 1) sendStatus();
+      sendStatusSafe();
     }
-  }, 500);
-};
+}
 
 const rejectAllPending = (msg) => {
   for (const [id, p] of mcpPending.entries()) {
@@ -257,19 +318,69 @@ const callMcp = (method, params, timeoutMs = 60_000) => {
   });
 };
 
+// FastMCP returns argument-validation failures as a text result with
+// content like "Invalid arguments for tool 'App': ..." and (usually)
+// result.isError === true. Older FastMCP versions left isError unset, so
+// we also pattern-match the text. Either way we surface as an error so the
+// calling agent's prompt sees the failure instead of a confusing empty/ok.
+const VALIDATION_PATTERNS = [
+  /^Invalid arguments for tool/i,
+  /^Error executing tool/i,
+  /^Tool .* not found/i,
+  /validation error/i,
+];
+const looksLikeValidationError = (text) => !!text && VALIDATION_PATTERNS.some((rx) => rx.test(text));
+
+const argsHash = (args) => {
+  try { return crypto.createHash('sha1').update(JSON.stringify(args || {})).digest('hex').slice(0, 12); }
+  catch { return 'noargs'; }
+};
+
 const callMcpTool = async (action, args) => {
+  const dampKey = `${action}:${argsHash(args)}`;
+  const damp = toolFailures.get(dampKey);
+  if (damp && damp.count >= DAMPEN_THRESHOLD && Date.now() - damp.ts < DAMPEN_TTL_MS) {
+    // Same call has failed N times in a row recently — refuse to forward
+    // again so a confused agent can't infinite-loop us against MCP.
+    return {
+      error: `Refusing to retry "${action}" with identical args — failed ${damp.count}× in a row. ` +
+        `Last error: ${damp.lastError}. Change the arguments or wait ${Math.round((DAMPEN_TTL_MS - (Date.now() - damp.ts))/1000)}s.`,
+      dampened: true,
+    };
+  }
+
   const res = await callMcp('tools/call', { name: action, arguments: args || {} });
-  if (res?.error) return { error: String(res.error.message || JSON.stringify(res.error)).slice(0, 1500) };
+
+  const recordFailure = (errText) => {
+    const prev = toolFailures.get(dampKey) || { count: 0 };
+    toolFailures.set(dampKey, { count: prev.count + 1, lastError: errText.slice(0, 300), ts: Date.now() });
+  };
+  const clearFailure = () => toolFailures.delete(dampKey);
+
+  if (res?.error) {
+    const errText = String(res.error.message || JSON.stringify(res.error)).slice(0, 1500);
+    recordFailure(errText);
+    return { error: errText };
+  }
   const content = res?.result?.content;
-  if (!content) return { output: JSON.stringify(res?.result ?? null).slice(0, 3000) };
+  if (!content) { clearFailure(); return { output: JSON.stringify(res?.result ?? null).slice(0, 3000) }; }
+
   let output = '';
   let screenshot = null;
   for (const c of content) {
     if (c.type === 'text') output += (output ? '\n' : '') + c.text;
     if (c.type === 'image') screenshot = c.data;
   }
-  // Truncate large text output to keep WS messages reasonable
+
+  // Detect FastMCP-style failure: isError flag or validation-pattern text.
+  if (res.result.isError === true || looksLikeValidationError(output)) {
+    const errText = output || 'Tool returned isError without text';
+    recordFailure(errText);
+    return { error: errText.slice(0, 1500) };
+  }
+
   if (output.length > 4000) output = output.slice(0, 4000) + '\n…[truncated]';
+  clearFailure();
   return { output, screenshot };
 };
 
@@ -323,6 +434,9 @@ const getCapabilities = () => ({
   mcpError: state.mcpError,
   mcpTools: state.mcpTools,
   mcpToolSchemas: state.mcpToolSchemas,
+  mcpVersion: state.mcpVersion,
+  bootPhase: state.bootPhase,
+  bootMessage: state.bootMessage,
   sessionArmed: state.sessionArmed,
   consentMode: CONSENT.mode,
   hostname: os.hostname(),
@@ -473,6 +587,9 @@ const dashServer = http.createServer((req, res) => {
       mcpReady: state.mcpReady,
       mcpError: state.mcpError,
       mcpTools: state.mcpTools,
+      mcpVersion: state.mcpVersion,
+      bootPhase: state.bootPhase,
+      bootMessage: state.bootMessage,
       relayConnected: state.relayConnected,
       agentJoined: state.agentJoined,
       pairing: PAIRING,
@@ -538,25 +655,96 @@ dashServer.listen(DASHBOARD_PORT, '127.0.0.1', () => {
 });
 
 // ─── Boot ────────────────────────────────────────────────────────────────────
+//
+// Staged boot sequence — each phase awaits the previous one so we never
+// advertise the bridge as ready while a dependency is still loading.
+//
+//   preflight  → confirm uv/uvx on PATH, dashboard listening
+//   ensuring   → install windows-mcp (first run) or skip-if-cached, weekly update check
+//   spawning   → uvx windows-mcp serve  (child process)
+//   handshake  → wait for FastMCP banner, then JSON-RPC initialize + tools/list
+//   ready      → print the "win-bridge ready" banner; agents may now Connect
+//
+// Until phase=ready, the dashboard /state and agent capabilities report the
+// current bootPhase + bootMessage so callers can show "Installing…" instead
+// of a misleading "connected but mcpReady=false" gap.
 
-console.log('');
-console.log('  ════════════════════════════════════════════════════════════');
-console.log('  win-bridge ready');
-console.log('  ════════════════════════════════════════════════════════════');
-console.log(`  Agent URL    →  ws://localhost:${AGENT_WS_PORT}`);
-console.log(`  Dashboard    →  http://localhost:${DASHBOARD_PORT}`);
-console.log(`  Consent mode →  ${CONSENT.mode}`);
-console.log('  ════════════════════════════════════════════════════════════');
-console.log(`  Paste the Agent URL into the chatp web app's Workspace tab,`);
-console.log(`  then click Connect. No pairing code needed for local use.`);
-console.log('  ════════════════════════════════════════════════════════════');
-console.log('');
-console.log(`[bridge] audit log: ${AUDIT_FILE}`);
+const printPreReadyBanner = () => {
+  console.log('');
+  console.log('  ────────────────────────────────────────────────────────────');
+  console.log('  win-bridge — starting up');
+  console.log('  ────────────────────────────────────────────────────────────');
+  console.log(`  Dashboard    →  http://localhost:${DASHBOARD_PORT}  (status visible here)`);
+  console.log(`  Agent URL    →  ws://localhost:${AGENT_WS_PORT}     (not ready yet)`);
+  console.log('  ────────────────────────────────────────────────────────────');
+  console.log(`[bridge] audit log: ${AUDIT_FILE}`);
+};
 
-if (!args['dashboard-only']) {
+const printReadyBanner = () => {
+  if (state._readyBannerShown) return;
+  state._readyBannerShown = true;
+  console.log('');
+  console.log('  ════════════════════════════════════════════════════════════');
+  console.log('  win-bridge ready');
+  console.log('  ════════════════════════════════════════════════════════════');
+  console.log(`  Agent URL    →  ws://localhost:${AGENT_WS_PORT}`);
+  console.log(`  Dashboard    →  http://localhost:${DASHBOARD_PORT}`);
+  console.log(`  Consent mode →  ${CONSENT.mode}`);
+  console.log(`  Windows-MCP  →  ${state.mcpVersion || 'unknown'}  (${state.mcpTools.length} tools)`);
+  console.log('  ════════════════════════════════════════════════════════════');
+  console.log(`  Paste the Agent URL into the chatp web app's Workspace tab,`);
+  console.log(`  then click Connect. No pairing code needed for local use.`);
+  console.log('  ════════════════════════════════════════════════════════════');
+  console.log('');
+};
+
+printPreReadyBanner();
+
+async function boot() {
+  if (args['dashboard-only']) {
+    setBootPhase('ready', 'dashboard-only mode');
+    return;
+  }
+
+  // Phase 1: ensure windows-mcp is installed (or update-check) BEFORE spawning.
+  // ensureWindowsMcp() resolves only when the package is verified on disk —
+  // a still-downloading install can never race the serve handshake.
+  setBootPhase('ensuring', 'checking windows-mcp install');
+  try {
+    const ensured = await ensureWindowsMcp({
+      forceUpdate: args['force-update'] === true,
+      onPhase: ({ phase, msg }) => {
+        // Reflect uv's substeps into our bootPhase so the dashboard can show them.
+        const human = `windows-mcp ${phase}: ${msg}`;
+        state.bootMessage = human;
+        audit({ kind: 'ensure_mcp', msg: human });
+        sendStatusSafe();
+      },
+    });
+    state.mcpVersion = ensured.version;
+    state.mcpFirstInstall = ensured.firstInstall;
+  } catch (err) {
+    state.mcpError = err.message;
+    setBootPhase('error', err.message);
+    console.error(`[bridge] ✗ ${err.message}`);
+    console.error(`[bridge]   Bridge will keep running so you can use the dashboard, but agents cannot execute actions.`);
+    return;
+  }
+
+  // Phase 2: spawn MCP child. The initialize handshake fires from inside
+  // startMcp() *after* we see the FastMCP banner — not on a blind timer.
+  setBootPhase('spawning', `uvx windows-mcp serve (version ${state.mcpVersion})`);
   startMcp();
-  if (config.useRelay) connectRelay();    // opt-in: only connect to relay if configured
+
+  // Phase 3: optional outbound relay (independent of MCP readiness).
+  if (config.useRelay) connectRelay();
 }
+
+boot().catch((err) => {
+  console.error(`[bridge] fatal boot error: ${err.message}`);
+  state.mcpError = err.message;
+  setBootPhase('error', err.message);
+});
 
 // Ctrl-C → clean shutdown
 process.on('SIGINT', () => {

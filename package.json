@@ -1,6 +1,6 @@
 {
   "name": "win-bridge",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Local agent for Windows that lets a remote chatp web app drive your desktop (shell, files, UI, screenshots) via Windows-MCP.",
   "main": "bridge.js",
   "bin": {
@@ -10,6 +10,8 @@
     "start": "node bridge.js",
     "dashboard": "node bridge.js --dashboard-only",
     "setup": "node scripts/setup-config.js",
+    "ensure-mcp": "node scripts/ensure-mcp.js",
+    "ensure-mcp:force": "node scripts/ensure-mcp.js --force-update",
     "postinstall": "node scripts/check-uvx.js && node scripts/setup-config.js"
   },
   "repository": {
