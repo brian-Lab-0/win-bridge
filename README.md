@@ -7,7 +7,8 @@
 # Spaces Bridge
 
 ### Connect your Windows desktop to [Spaces](https://spaces.openbnet.com) — and let AI truly control your machine.
-https://github.com/sponsors/brian-Lab-0?preview=true
+
+[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub-pink?logo=githubsponsors&style=for-the-badge)](https://github.com/sponsors/brian-Lab-0)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org)
